@@ -139,6 +139,106 @@ const getRealIP = (req) => {
 };
 
 // ============================================================
+//  HEALTH CHECK
+// ============================================================
+
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "OK",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    mongodb:
+      mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
+    redis: redisClient.client ? "Connected" : "Disconnected",
+  });
+});
+
+// ============================================================
+//  API ROUTES
+// ============================================================
+
+const apiV1 = "/api/v1";
+
+app.use(`${apiV1}/urls`, urlRoutes);
+app.use(`${apiV1}/users`, userRoutes);
+app.use(`${apiV1}/analytics`, analyticsRoutes);
+
+// ============================================================
+//  DIRECT TEST ROUTE - MY URLS
+// ============================================================
+
+app.get("/api/v1/urls/my-urls", protect, async (req, res) => {
+  try {
+    const Url = require("./models/Url.model");
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 15;
+    const skip = (page - 1) * limit;
+
+    const total = await Url.countDocuments({ userId: req.user._id });
+
+    const urls = await Url.find({ userId: req.user._id })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const baseUrl =
+      process.env.BASE_URL || `http://localhost:${process.env.PORT || 5000}`;
+    const urlsWithShortUrl = urls.map((url) => ({
+      ...url.toObject(),
+      shortUrl: `${baseUrl}/${url.shortCode}`,
+    }));
+
+    res.json({
+      statusCode: 200,
+      success: true,
+      message: "URLs retrieved successfully",
+      data: urlsWithShortUrl,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        itemsPerPage: limit,
+        hasNext: page < Math.ceil(total / limit),
+        hasPrev: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Error in /my-urls:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// ============================================================
+//  ROOT ENDPOINT
+// ============================================================
+
+app.get("/", (req, res) => {
+  res.json({
+    name: "URL Shortener API",
+    version: "1.0.0",
+    documentation: "/api-docs",
+    health: "/health",
+    endpoints: {
+      shorten: "POST /api/v1/urls/shorten",
+      redirect: "GET /:shortCode",
+      stats: "GET /api/v1/urls/stats/:shortCode",
+      userUrls: "GET /api/v1/urls/my-urls",
+      bulkShorten: "POST /api/v1/urls/bulk",
+    },
+  });
+});
+
+// ============================================================
+//  SWAGGER DOCUMENTATION
+// ============================================================
+
+swaggerDocs(app, process.env.PORT || 5000);
+
+// ============================================================
 //  REDIRECT ROUTE - WITH GEOLOCATION
 // ============================================================
 
@@ -259,106 +359,6 @@ app.get("/:shortCode", async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
-
-// ============================================================
-//  DIRECT TEST ROUTE - MY URLS
-// ============================================================
-
-app.get("/api/v1/urls/my-urls", protect, async (req, res) => {
-  try {
-    const Url = require("./models/Url.model");
-
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 15;
-    const skip = (page - 1) * limit;
-
-    const total = await Url.countDocuments({ userId: req.user._id });
-
-    const urls = await Url.find({ userId: req.user._id })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-
-    const baseUrl =
-      process.env.BASE_URL || `http://localhost:${process.env.PORT || 5000}`;
-    const urlsWithShortUrl = urls.map((url) => ({
-      ...url.toObject(),
-      shortUrl: `${baseUrl}/${url.shortCode}`,
-    }));
-
-    res.json({
-      statusCode: 200,
-      success: true,
-      message: "URLs retrieved successfully",
-      data: urlsWithShortUrl,
-      pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(total / limit),
-        totalItems: total,
-        itemsPerPage: limit,
-        hasNext: page < Math.ceil(total / limit),
-        hasPrev: page > 1,
-      },
-    });
-  } catch (error) {
-    console.error("Error in /my-urls:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-});
-
-// ============================================================
-//  HEALTH CHECK
-// ============================================================
-
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "OK",
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-    mongodb:
-      mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
-    redis: redisClient.client ? "Connected" : "Disconnected",
-  });
-});
-
-// ============================================================
-//  API ROUTES
-// ============================================================
-
-const apiV1 = "/api/v1";
-
-app.use(`${apiV1}/urls`, urlRoutes);
-app.use(`${apiV1}/users`, userRoutes);
-app.use(`${apiV1}/analytics`, analyticsRoutes);
-
-// ============================================================
-//  ROOT ENDPOINT
-// ============================================================
-
-app.get("/", (req, res) => {
-  res.json({
-    name: "URL Shortener API",
-    version: "1.0.0",
-    documentation: "/api-docs",
-    health: "/health",
-    endpoints: {
-      shorten: "POST /api/v1/urls/shorten",
-      redirect: "GET /:shortCode",
-      stats: "GET /api/v1/urls/stats/:shortCode",
-      userUrls: "GET /api/v1/urls/my-urls",
-      bulkShorten: "POST /api/v1/urls/bulk",
-    },
-  });
-});
-
-// ============================================================
-//  SWAGGER DOCUMENTATION
-// ============================================================
-
-swaggerDocs(app, process.env.PORT || 5000);
 
 // ============================================================
 //  404 HANDLER
